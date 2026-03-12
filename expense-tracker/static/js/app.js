@@ -15,7 +15,7 @@ const WEEK_COLORS = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#FFEAA7", "#DDA0DD"];
 /* ── STATE ──────────────────────────────────────────────────────────────── */
 const now = new Date();
 let navYear   = now.getFullYear();
-let navMonth  = now.getMonth();   // 0-indexed
+let navMonth  = now.getMonth(); // 0-indexed
 let activeView   = "list";
 let activeFilter = "all";
 let expenses = [];
@@ -24,9 +24,9 @@ let expenses = [];
 const fmt = (n) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
 
-const navStr   = () => `${navYear}-${String(navMonth + 1).padStart(2, "0")}`;
-const navLabel = () => new Date(navYear, navMonth, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
-const navShort = () => new Date(navYear, navMonth, 1).toLocaleDateString("en-IN", { month: "short" });
+const navStr    = () => `${navYear}-${String(navMonth + 1).padStart(2, "0")}`;
+const navLabel  = () => new Date(navYear, navMonth, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+const navShort  = () => new Date(navYear, navMonth, 1).toLocaleDateString("en-IN", { month: "short" });
 const isCurrent = () => navYear === now.getFullYear() && navMonth === now.getMonth();
 const todayStr  = () => new Date().toISOString().split("T")[0];
 const getCat    = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[6];
@@ -41,8 +41,53 @@ function fmtDate(d) {
 
 /* ── API ────────────────────────────────────────────────────────────────── */
 async function apiFetch(path, opts = {}) {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
-  return res.json();
+  try {
+    const res = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...opts
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("API error:", data);
+      showToast(data.error || "Something went wrong");
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.error("Fetch failed:", err);
+    showToast("Network error — check your connection");
+    return null;
+  }
+}
+
+function showToast(msg) {
+  let t = document.getElementById("toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "toast";
+    t.style.cssText = `
+      position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+      background:#2a2118; color:#faf8f5; padding:10px 20px; border-radius:10px;
+      font-family:'DM Mono',monospace; font-size:12px; z-index:999;
+      opacity:0; transition:opacity .2s; pointer-events:none; white-space:nowrap;
+    `;
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = "1";
+  setTimeout(() => { t.style.opacity = "0"; }, 3000);
+}
+
+/* ── MONTH NAVIGATION ────────────────────────────────────────────────────── */
+function prevMonth() {
+  if (navMonth === 0) { navYear--; navMonth = 11; }
+  else { navMonth--; }
+}
+
+function nextMonth() {
+  if (isCurrent()) return;
+  if (navMonth === 11) { navYear++; navMonth = 0; }
+  else { navMonth++; }
 }
 
 /* ── RENDER: HEADER ─────────────────────────────────────────────────────── */
@@ -57,15 +102,14 @@ function renderHeader(total) {
 function renderFilters() {
   const c = document.getElementById("categoryFilters");
   c.innerHTML = "";
-
-  const all = makeFilterBtn("all", "all", activeFilter === "all",
-    activeFilter === "all" ? "#c8a96e" : null, activeFilter === "all" ? "#0f0e0c" : null);
-  c.appendChild(all);
-
+  const allBtn = makeFilterBtn("all", "all", activeFilter === "all",
+    activeFilter === "all" ? "#c0622a" : null,
+    activeFilter === "all" ? "white" : null);
+  c.appendChild(allBtn);
   CATEGORIES.forEach((cat) => {
     const active = activeFilter === cat.id;
     c.appendChild(makeFilterBtn(cat.id, `${cat.icon} ${cat.id}`, active,
-      active ? cat.color : null, active ? "#0f0e0c" : null));
+      active ? cat.color : null, active ? "#2a2118" : null));
   });
 }
 
@@ -76,6 +120,7 @@ function makeFilterBtn(cat, label, active, bg, color) {
   b.textContent = label;
   if (bg)    b.style.background = bg;
   if (color) b.style.color = color;
+  if (active) b.style.borderColor = bg;
   return b;
 }
 
@@ -108,7 +153,6 @@ function renderList() {
         <span class="date-label">${fmtDate(date)}</span>
         <span class="date-subtotal">${fmt(subtotal)}</span>
       </div>`;
-
     group.forEach((e) => {
       const cat  = getCat(e.category);
       const item = document.createElement("div");
@@ -129,37 +173,34 @@ function renderList() {
 
 /* ── SVG PIE CHART ──────────────────────────────────────────────────────── */
 function drawPie(svgId, data, total) {
-  const svg  = document.getElementById(svgId);
+  const svg = document.getElementById(svgId);
   svg.innerHTML = "";
   const CX = 74, CY = 74, R = 52;
   const pts  = data.filter((d) => d.value > 0);
   const tVal = pts.reduce((s, d) => s + d.value, 0);
 
-  // Background ring
-  const bg = svgEl("circle", { cx: CX, cy: CY, r: R, fill: "none", stroke: "#1e1d1a", "stroke-width": 20 });
+  const bg = svgEl("circle", { cx: CX, cy: CY, r: R, fill: "none", stroke: "#ede8e0", "stroke-width": 20 });
   svg.appendChild(bg);
 
   if (!pts.length) {
-    svg.appendChild(svgText(CX, CY + 4, "no data", "#4a4840", 10));
+    svg.appendChild(svgText(CX, CY + 4, "no data", "#b0a496", 10));
     return;
   }
 
   let angle = -Math.PI / 2;
   const slices = pts.map((d) => {
-    const a  = (d.value / tVal) * 2 * Math.PI;
-    const s  = angle;
-    angle   += a;
+    const a = (d.value / tVal) * 2 * Math.PI;
+    const s = angle; angle += a;
     return { ...d, a, start: s, end: angle,
-      x1: CX + R * Math.cos(s),   y1: CY + R * Math.sin(s),
+      x1: CX + R * Math.cos(s),    y1: CY + R * Math.sin(s),
       x2: CX + R * Math.cos(angle), y2: CY + R * Math.sin(angle),
-      large: a > Math.PI ? 1 : 0, mid: s + a / 2 };
+      large: a > Math.PI ? 1 : 0,  mid: s + a / 2 };
   });
 
-  // Centre text group (declared early so hover can update it)
   const cg = document.createElementNS("http://www.w3.org/2000/svg", "g");
   cg.id = `c-${svgId}`;
-  const tl = svgText(CX, 69, "TOTAL", "#7a7060", 8, "var(--mono)", 1);
-  const tv = svgText(CX, 84, fmt(total || tVal), "#c8a96e", 12, "var(--serif)", 0, "bold");
+  const tl = svgText(CX, 69, "TOTAL", "#9a8e80", 8, "'DM Mono',monospace", 1);
+  const tv = svgText(CX, 84, fmt(total || tVal), "#c0622a", 12, "'Fraunces',serif", 0, "bold");
   cg.append(tl, tv);
 
   slices.forEach((s) => {
@@ -167,7 +208,7 @@ function drawPie(svgId, data, total) {
       d: `M ${s.x1} ${s.y1} A ${R} ${R} 0 ${s.large} 1 ${s.x2} ${s.y2}`,
       fill: "none", stroke: s.color, "stroke-width": 20, "stroke-linecap": "butt",
     });
-    p.style.cursor     = "pointer";
+    p.style.cursor = "pointer";
     p.style.transition = "stroke-width .15s, filter .15s";
     p.addEventListener("mouseenter", () => {
       p.setAttribute("stroke-width", "26");
@@ -177,20 +218,18 @@ function drawPie(svgId, data, total) {
     });
     p.addEventListener("mouseleave", () => {
       p.setAttribute("stroke-width", "20"); p.style.filter = "none";
-      tl.textContent = "TOTAL"; tl.setAttribute("font-size", 8); tl.setAttribute("fill", "#7a7060"); tl.setAttribute("y", 69);
-      tv.textContent = fmt(total || tVal); tv.setAttribute("fill", "#c8a96e"); tv.setAttribute("y", 84);
+      tl.textContent = "TOTAL"; tl.setAttribute("font-size", 8); tl.setAttribute("fill", "#9a8e80"); tl.setAttribute("y", 69);
+      tv.textContent = fmt(total || tVal); tv.setAttribute("fill", "#c0622a"); tv.setAttribute("y", 84);
     });
     svg.appendChild(p);
 
-    // Gap line at slice start
     const gap = svgEl("line", {
-      x1: CX + (R - 12) * Math.cos(s.start), y1: CY + (R - 12) * Math.sin(s.start),
-      x2: CX + (R + 12) * Math.cos(s.start), y2: CY + (R + 12) * Math.sin(s.start),
-      stroke: "#0f0e0c", "stroke-width": 2,
+      x1: CX + (R-12)*Math.cos(s.start), y1: CY + (R-12)*Math.sin(s.start),
+      x2: CX + (R+12)*Math.cos(s.start), y2: CY + (R+12)*Math.sin(s.start),
+      stroke: "#faf8f5", "stroke-width": 2,
     });
     svg.appendChild(gap);
   });
-
   svg.appendChild(cg);
 }
 
@@ -199,11 +238,9 @@ function svgEl(tag, attrs) {
   Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
   return el;
 }
-function svgText(x, y, text, fill, size, family = "var(--mono)", spacing = 0, weight = "normal") {
-  const t = svgEl("text", {
-    x, y, "text-anchor": "middle", fill, "font-size": size,
-    "font-family": family, "letter-spacing": spacing, "font-weight": weight,
-  });
+function svgText(x, y, text, fill, size, family = "'DM Mono',monospace", spacing = 0, weight = "normal") {
+  const t = svgEl("text", { x, y, "text-anchor": "middle", fill, "font-size": size,
+    "font-family": family, "letter-spacing": spacing, "font-weight": weight });
   t.textContent = text;
   return t;
 }
@@ -211,34 +248,28 @@ function svgText(x, y, text, fill, size, family = "var(--mono)", spacing = 0, we
 /* ── RENDER: SUMMARY ────────────────────────────────────────────────────── */
 async function renderSummary() {
   const data = await apiFetch(`/api/summary?month=${navStr()}`);
+  if (!data) return;
   const { categories, total, all_time, count, weekly } = data;
 
-  document.getElementById("statAllTime").textContent  = fmt(all_time);
-  document.getElementById("statMonth").textContent    = fmt(total);
+  document.getElementById("statAllTime").textContent    = fmt(all_time);
+  document.getElementById("statMonth").textContent      = fmt(total);
   document.getElementById("statMonthLabel").textContent = navShort();
-  document.getElementById("statCount").textContent    = count;
-  document.getElementById("statAvg").textContent      = count ? fmt(total / count) : "₹0";
+  document.getElementById("statCount").textContent      = count;
+  document.getElementById("statAvg").textContent        = count ? fmt(total / count) : "₹0";
 
-  // Category pie
   const catMap = Object.fromEntries(categories.map((c) => [c.category, c.total]));
-  const catPieData = CATEGORIES
-    .map((c) => ({ ...c, value: catMap[c.id] || 0 }))
-    .filter((c) => c.value > 0);
+  const catPieData = CATEGORIES.map((c) => ({ ...c, value: catMap[c.id] || 0 })).filter((c) => c.value > 0);
   drawPie("catPie", catPieData, total);
 
-  // Category legend
   document.getElementById("catLegend").innerHTML =
     CATEGORIES.map((c) => ({ ...c, v: catMap[c.id] || 0 }))
       .filter((c) => c.v > 0).sort((a, b) => b.v - a.v).slice(0, 5)
       .map((c) => legendRow(c.color, `${c.icon} ${c.id}`, Math.round((c.v / (total || 1)) * 100)))
       .join("");
 
-  // Weekly pie
-  const weekPieData = (weekly || []).map((w, i) => ({
+  const weekPieData = (weekly || []).map((w) => ({
     icon:  ["①","②","③","④","⑤"][w.week_num - 1] || `W${w.week_num}`,
-    value: w.total,
-    color: WEEK_COLORS[(w.week_num - 1) % WEEK_COLORS.length],
-    week_num: w.week_num,
+    value: w.total, color: WEEK_COLORS[(w.week_num - 1) % WEEK_COLORS.length], week_num: w.week_num,
   }));
   drawPie("weekPie", weekPieData, total);
 
@@ -249,12 +280,10 @@ async function renderSummary() {
         const e = Math.min(w.week_num * 7, daysInMonth);
         return legendRow(w.color, `${navShort()} ${s}–${e}`, Math.round((w.value / (total || 1)) * 100));
       }).join("")
-    : `<div class="legend-item"><span class="legend-name" style="color:#4a4840">no data</span></div>`;
+    : `<div class="legend-item"><span class="legend-name" style="color:#b0a496">no data</span></div>`;
 
-  // Category bars
-  const allCats = CATEGORIES.map((c) => ({ ...c, total: catMap[c.id] || 0 }))
-    .sort((a, b) => b.total - a.total);
-  const maxVal = allCats[0]?.total || 1;
+  const allCats = CATEGORIES.map((c) => ({ ...c, total: catMap[c.id] || 0 })).sort((a, b) => b.total - a.total);
+  const maxVal  = allCats[0]?.total || 1;
   document.getElementById("barList").innerHTML = allCats.map((c) => `
     <div class="bar-item">
       <div class="bar-header">
@@ -262,7 +291,7 @@ async function renderSummary() {
         <span class="bar-amount ${c.total ? "" : "zero"}">${fmt(c.total)}</span>
       </div>
       <div class="bar-track">
-        <div class="bar-fill" style="width:${(c.total / maxVal) * 100}%;background:${c.color}"></div>
+        <div class="bar-fill" style="width:${(c.total/maxVal)*100}%;background:${c.color}"></div>
       </div>
     </div>`).join("");
 }
@@ -277,7 +306,8 @@ function legendRow(color, name, pct) {
 
 /* ── FULL REFRESH ───────────────────────────────────────────────────────── */
 async function refresh() {
-  expenses = await apiFetch(`/api/expenses?month=${navStr()}`);
+  const data = await apiFetch(`/api/expenses?month=${navStr()}`);
+  expenses = data || [];
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   renderHeader(total);
   renderFilters();
@@ -291,21 +321,19 @@ function buildCatGrid() {
   grid.innerHTML = "";
   CATEGORIES.forEach((cat) => {
     const b = document.createElement("button");
-    b.type = "button";
-    b.className = "cat-btn";
-    b.dataset.cat = cat.id;
+    b.type = "button"; b.className = "cat-btn"; b.dataset.cat = cat.id;
     b.innerHTML = `<span class="cat-emoji">${cat.icon}</span><span class="cat-name">${cat.id}</span>`;
     b.addEventListener("click", () => {
       grid.querySelectorAll(".cat-btn").forEach((x) => {
         x.style.borderColor = ""; x.style.background = ""; x.style.color = "";
       });
       b.style.borderColor = cat.color;
-      b.style.background  = cat.color + "33";
+      b.style.background  = cat.color + "22";
       b.style.color       = cat.color;
     });
     grid.appendChild(b);
   });
-  grid.querySelector(".cat-btn").click(); // default: food
+  grid.querySelector(".cat-btn").click();
 }
 
 function openModal() {
@@ -322,20 +350,29 @@ function closeModal() {
 
 async function submitExpense() {
   const amount = parseFloat(document.getElementById("inputAmount").value);
-  if (!amount || amount <= 0) { document.getElementById("inputAmount").focus(); return; }
-
-  const note     = document.getElementById("inputNote").value.trim();
-  const date     = document.getElementById("inputDate").value || todayStr();
+  if (!amount || amount <= 0) {
+    document.getElementById("inputAmount").focus();
+    showToast("Please enter a valid amount");
+    return;
+  }
+  const note      = document.getElementById("inputNote").value.trim();
+  const date      = document.getElementById("inputDate").value || todayStr();
   const activeCat = document.querySelector(".cat-btn[style*='border-color']");
   const category  = activeCat ? activeCat.dataset.cat : "other";
 
-  await apiFetch("/api/expenses", {
+  const btn = document.getElementById("submitBtn");
+  btn.textContent = "Saving…"; btn.disabled = true;
+
+  const result = await apiFetch("/api/expenses", {
     method: "POST",
     body: JSON.stringify({ amount, note, category, date }),
   });
+
+  btn.textContent = "Add Expense"; btn.disabled = false;
+
+  if (!result) return; // error already shown by apiFetch
   closeModal();
 
-  // Navigate to the month of the new expense if different
   const [y, m] = date.slice(0, 7).split("-").map(Number);
   navYear = y; navMonth = m - 1;
   await refresh();
@@ -343,12 +380,12 @@ async function submitExpense() {
 
 /* ── EVENT LISTENERS ────────────────────────────────────────────────────── */
 document.getElementById("prevMonth").addEventListener("click", async () => {
-  if (navMonth === 0) { navYear--; navMonth = 11; } else navMonth--;
+  prevMonth();
   await refresh();
 });
 document.getElementById("nextMonth").addEventListener("click", async () => {
   if (isCurrent()) return;
-  if (navMonth === 11) { navYear++; navMonth = 0; } else navMonth++;
+  nextMonth();
   await refresh();
 });
 
