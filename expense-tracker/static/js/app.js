@@ -14,11 +14,12 @@ const WEEK_COLORS = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#FFEAA7", "#DDA0DD"];
 
 /* ── STATE ──────────────────────────────────────────────────────────────── */
 const now = new Date();
-let navYear   = now.getFullYear();
-let navMonth  = now.getMonth(); // 0-indexed
+let navYear      = now.getFullYear();
+let navMonth     = now.getMonth(); // 0-indexed
 let activeView   = "list";
 let activeFilter = "all";
-let expenses = [];
+let expenses     = [];
+let isNavigating = false; // prevent double-clicks
 
 /* ── HELPERS ────────────────────────────────────────────────────────────── */
 const fmt = (n) =>
@@ -42,10 +43,7 @@ function fmtDate(d) {
 /* ── API ────────────────────────────────────────────────────────────────── */
 async function apiFetch(path, opts = {}) {
   try {
-    const res = await fetch(path, {
-      headers: { "Content-Type": "application/json" },
-      ...opts
-    });
+    const res  = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
     const data = await res.json();
     if (!res.ok) {
       console.error("API error:", data);
@@ -73,18 +71,18 @@ function showToast(msg) {
     `;
     document.body.appendChild(t);
   }
-  t.textContent = msg;
+  t.textContent  = msg;
   t.style.opacity = "1";
   setTimeout(() => { t.style.opacity = "0"; }, 3000);
 }
 
 /* ── MONTH NAVIGATION ────────────────────────────────────────────────────── */
-function prevMonth() {
+function goPrev() {
   if (navMonth === 0) { navYear--; navMonth = 11; }
   else { navMonth--; }
 }
 
-function nextMonth() {
+function goNext() {
   if (isCurrent()) return;
   if (navMonth === 11) { navYear++; navMonth = 0; }
   else { navMonth++; }
@@ -94,18 +92,16 @@ function nextMonth() {
 function renderHeader(total) {
   document.getElementById("monthTitle").textContent  = navLabel();
   document.getElementById("monthLabel").textContent  = isCurrent() ? "this month" : "viewing";
-  document.getElementById("nextMonth").disabled      = isCurrent();
   document.getElementById("headerTotal").textContent = fmt(total || 0);
+  document.getElementById("prevMonth").disabled      = false;        // always re-enable
+  document.getElementById("nextMonth").disabled      = isCurrent();  // disable only at current month
 }
 
 /* ── RENDER: FILTERS ────────────────────────────────────────────────────── */
 function renderFilters() {
   const c = document.getElementById("categoryFilters");
   c.innerHTML = "";
-  const allBtn = makeFilterBtn("all", "all", activeFilter === "all",
-    activeFilter === "all" ? "#c0622a" : null,
-    activeFilter === "all" ? "white" : null);
-  c.appendChild(allBtn);
+  c.appendChild(makeFilterBtn("all", "all", activeFilter === "all", "#c0622a", "white"));
   CATEGORIES.forEach((cat) => {
     const active = activeFilter === cat.id;
     c.appendChild(makeFilterBtn(cat.id, `${cat.icon} ${cat.id}`, active,
@@ -115,22 +111,19 @@ function renderFilters() {
 
 function makeFilterBtn(cat, label, active, bg, color) {
   const b = document.createElement("button");
-  b.className = "filter-tag" + (active ? " active" : "");
-  b.dataset.cat = cat;
-  b.textContent = label;
-  if (bg)    b.style.background = bg;
-  if (color) b.style.color = color;
-  if (active) b.style.borderColor = bg;
+  b.className    = "filter-tag" + (active ? " active" : "");
+  b.dataset.cat  = cat;
+  b.textContent  = label;
+  if (bg)     b.style.background   = bg;
+  if (color)  b.style.color        = color;
+  if (active) b.style.borderColor  = bg;
   return b;
 }
 
 /* ── RENDER: LIST ───────────────────────────────────────────────────────── */
 function renderList() {
-  const filtered = activeFilter === "all"
-    ? expenses
-    : expenses.filter((e) => e.category === activeFilter);
-
-  const grouped = {};
+  const filtered    = activeFilter === "all" ? expenses : expenses.filter((e) => e.category === activeFilter);
+  const grouped     = {};
   filtered.forEach((e) => { (grouped[e.date] = grouped[e.date] || []).push(e); });
   const sortedDates = Object.keys(grouped).sort((a, b) => b.localeCompare(a));
 
@@ -138,7 +131,8 @@ function renderList() {
   if (!sortedDates.length) {
     el.innerHTML = `<div class="empty-state">
       <div class="empty-icon">₹</div>
-      <div class="empty-text">no expenses for ${navShort()}</div></div>`;
+      <div class="empty-text">no expenses for ${navShort()}</div>
+    </div>`;
     return;
   }
 
@@ -173,14 +167,13 @@ function renderList() {
 
 /* ── SVG PIE CHART ──────────────────────────────────────────────────────── */
 function drawPie(svgId, data, total) {
-  const svg = document.getElementById(svgId);
+  const svg  = document.getElementById(svgId);
   svg.innerHTML = "";
   const CX = 74, CY = 74, R = 52;
   const pts  = data.filter((d) => d.value > 0);
   const tVal = pts.reduce((s, d) => s + d.value, 0);
 
-  const bg = svgEl("circle", { cx: CX, cy: CY, r: R, fill: "none", stroke: "#ede8e0", "stroke-width": 20 });
-  svg.appendChild(bg);
+  svg.appendChild(svgEl("circle", { cx: CX, cy: CY, r: R, fill: "none", stroke: "#ede8e0", "stroke-width": 20 }));
 
   if (!pts.length) {
     svg.appendChild(svgText(CX, CY + 4, "no data", "#b0a496", 10));
@@ -192,14 +185,13 @@ function drawPie(svgId, data, total) {
     const a = (d.value / tVal) * 2 * Math.PI;
     const s = angle; angle += a;
     return { ...d, a, start: s, end: angle,
-      x1: CX + R * Math.cos(s),    y1: CY + R * Math.sin(s),
+      x1: CX + R * Math.cos(s),     y1: CY + R * Math.sin(s),
       x2: CX + R * Math.cos(angle), y2: CY + R * Math.sin(angle),
-      large: a > Math.PI ? 1 : 0,  mid: s + a / 2 };
+      large: a > Math.PI ? 1 : 0 };
   });
 
   const cg = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  cg.id = `c-${svgId}`;
-  const tl = svgText(CX, 69, "TOTAL", "#9a8e80", 8, "'DM Mono',monospace", 1);
+  const tl = svgText(CX, 69, "TOTAL",            "#9a8e80", 8,  "'DM Mono',monospace",  1);
   const tv = svgText(CX, 84, fmt(total || tVal), "#c0622a", 12, "'Fraunces',serif", 0, "bold");
   cg.append(tl, tv);
 
@@ -209,26 +201,23 @@ function drawPie(svgId, data, total) {
       fill: "none", stroke: s.color, "stroke-width": 20, "stroke-linecap": "butt",
     });
     p.style.cursor = "pointer";
-    p.style.transition = "stroke-width .15s, filter .15s";
+    p.style.transition = "stroke-width .15s";
     p.addEventListener("mouseenter", () => {
       p.setAttribute("stroke-width", "26");
-      p.style.filter = `drop-shadow(0 0 5px ${s.color}99)`;
-      tl.textContent = s.icon; tl.setAttribute("font-size", 14); tl.setAttribute("fill", s.color); tl.setAttribute("y", 69);
-      tv.textContent = `${Math.round((s.value / tVal) * 100)}%`; tv.setAttribute("fill", s.color); tv.setAttribute("y", 84);
+      tl.textContent = s.icon; tl.setAttribute("font-size", 14); tl.setAttribute("fill", s.color);
+      tv.textContent = `${Math.round((s.value / tVal) * 100)}%`; tv.setAttribute("fill", s.color);
     });
     p.addEventListener("mouseleave", () => {
-      p.setAttribute("stroke-width", "20"); p.style.filter = "none";
-      tl.textContent = "TOTAL"; tl.setAttribute("font-size", 8); tl.setAttribute("fill", "#9a8e80"); tl.setAttribute("y", 69);
-      tv.textContent = fmt(total || tVal); tv.setAttribute("fill", "#c0622a"); tv.setAttribute("y", 84);
+      p.setAttribute("stroke-width", "20");
+      tl.textContent = "TOTAL"; tl.setAttribute("font-size", 8); tl.setAttribute("fill", "#9a8e80");
+      tv.textContent = fmt(total || tVal); tv.setAttribute("fill", "#c0622a");
     });
     svg.appendChild(p);
-
-    const gap = svgEl("line", {
+    svg.appendChild(svgEl("line", {
       x1: CX + (R-12)*Math.cos(s.start), y1: CY + (R-12)*Math.sin(s.start),
       x2: CX + (R+12)*Math.cos(s.start), y2: CY + (R+12)*Math.sin(s.start),
       stroke: "#faf8f5", "stroke-width": 2,
-    });
-    svg.appendChild(gap);
+    }));
   });
   svg.appendChild(cg);
 }
@@ -257,7 +246,7 @@ async function renderSummary() {
   document.getElementById("statCount").textContent      = count;
   document.getElementById("statAvg").textContent        = count ? fmt(total / count) : "₹0";
 
-  const catMap = Object.fromEntries(categories.map((c) => [c.category, c.total]));
+  const catMap     = Object.fromEntries(categories.map((c) => [c.category, c.total]));
   const catPieData = CATEGORIES.map((c) => ({ ...c, value: catMap[c.id] || 0 })).filter((c) => c.value > 0);
   drawPie("catPie", catPieData, total);
 
@@ -268,7 +257,7 @@ async function renderSummary() {
       .join("");
 
   const weekPieData = (weekly || []).map((w) => ({
-    icon:  ["①","②","③","④","⑤"][w.week_num - 1] || `W${w.week_num}`,
+    icon: ["①","②","③","④","⑤"][w.week_num - 1] || `W${w.week_num}`,
     value: w.total, color: WEEK_COLORS[(w.week_num - 1) % WEEK_COLORS.length], week_num: w.week_num,
   }));
   drawPie("weekPie", weekPieData, total);
@@ -291,7 +280,7 @@ async function renderSummary() {
         <span class="bar-amount ${c.total ? "" : "zero"}">${fmt(c.total)}</span>
       </div>
       <div class="bar-track">
-        <div class="bar-fill" style="width:${(c.total/maxVal)*100}%;background:${c.color}"></div>
+        <div class="bar-fill" style="width:${(c.total / maxVal) * 100}%;background:${c.color}"></div>
       </div>
     </div>`).join("");
 }
@@ -307,7 +296,7 @@ function legendRow(color, name, pct) {
 /* ── FULL REFRESH ───────────────────────────────────────────────────────── */
 async function refresh() {
   const data = await apiFetch(`/api/expenses?month=${navStr()}`);
-  expenses = data || [];
+  expenses   = data || [];
   const total = expenses.reduce((s, e) => s + e.amount, 0);
   renderHeader(total);
   renderFilters();
@@ -369,10 +358,9 @@ async function submitExpense() {
   });
 
   btn.textContent = "Add Expense"; btn.disabled = false;
+  if (!result) return;
 
-  if (!result) return; // error already shown by apiFetch
   closeModal();
-
   const [y, m] = date.slice(0, 7).split("-").map(Number);
   navYear = y; navMonth = m - 1;
   await refresh();
@@ -380,13 +368,23 @@ async function submitExpense() {
 
 /* ── EVENT LISTENERS ────────────────────────────────────────────────────── */
 document.getElementById("prevMonth").addEventListener("click", async () => {
-  prevMonth();
+  if (isNavigating) return;
+  isNavigating = true;
+  document.getElementById("prevMonth").disabled = true;
+  document.getElementById("nextMonth").disabled = true;
+  goPrev();
   await refresh();
+  isNavigating = false;
 });
+
 document.getElementById("nextMonth").addEventListener("click", async () => {
-  if (isCurrent()) return;
-  nextMonth();
+  if (isNavigating || isCurrent()) return;
+  isNavigating = true;
+  document.getElementById("prevMonth").disabled = true;
+  document.getElementById("nextMonth").disabled = true;
+  goNext();
   await refresh();
+  isNavigating = false;
 });
 
 document.querySelectorAll(".tab").forEach((tab) => {
